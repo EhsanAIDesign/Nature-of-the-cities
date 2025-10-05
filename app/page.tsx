@@ -2,10 +2,13 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
 import { MapPin, Download, Loader2, Camera, Heart, Eye, Hash, Search, ChevronLeft, ChevronRight } from "lucide-react"
 
 interface ImageData {
@@ -13,7 +16,8 @@ interface ImageData {
   name: string
   location: string
   thumbnail?: string
-  source: "unsplash" | "pexels" // Added source field
+  source: "unsplash" | "pexels"
+  downloadUrl?: string
   metadata?: {
     photographer: string
     likes: number
@@ -30,6 +34,24 @@ interface SearchResults {
   current_page: number
 }
 
+const GOOGLE_FONTS = [
+  "Roboto",
+  "Open Sans",
+  "Lato",
+  "Montserrat",
+  "Oswald",
+  "Raleway",
+  "Poppins",
+  "Merriweather",
+  "Playfair Display",
+  "Ubuntu",
+  "Nunito",
+  "PT Sans",
+  "Bebas Neue",
+  "Dancing Script",
+  "Pacifico",
+]
+
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState<string>("")
   const [selectedImageIndex, setSelectedImageIndex] = useState<number>(0)
@@ -39,7 +61,70 @@ export default function Home() {
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null)
   const [isLoadingSearch, setIsLoadingSearch] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
-  const [sourceFilter, setSourceFilter] = useState<"all" | "unsplash" | "pexels">("all") // Added source filter state
+  const [sourceFilter, setSourceFilter] = useState<"all" | "unsplash" | "pexels">("all")
+
+  const [overlayColor, setOverlayColor] = useState("#000000")
+  const [overlayOpacity, setOverlayOpacity] = useState(50)
+  const [overlayText, setOverlayText] = useState("")
+  const [selectedFont, setSelectedFont] = useState("Roboto")
+  const [fontLoaded, setFontLoaded] = useState(false)
+  const [imageLoaded, setImageLoaded] = useState(false)
+
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
+
+  const currentImage = searchResults?.images[selectedImageIndex]
+
+  useEffect(() => {
+    const loadFont = async () => {
+      setFontLoaded(false)
+      const link = document.createElement("link")
+      link.href = `https://fonts.googleapis.com/css2?family=${selectedFont.replace(/ /g, "+")}:wght@400;700&display=swap`
+      link.rel = "stylesheet"
+      document.head.appendChild(link)
+
+      await document.fonts.load(`700 48px "${selectedFont}"`)
+      setFontLoaded(true)
+    }
+
+    loadFont()
+  }, [selectedFont])
+
+  useEffect(() => {
+    if (!imageRef.current || !canvasRef.current || !currentImage || !imageLoaded) return
+
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const img = imageRef.current
+
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+
+    ctx.drawImage(img, 0, 0)
+
+    if (overlayOpacity > 0) {
+      ctx.fillStyle = overlayColor
+      ctx.globalAlpha = overlayOpacity / 100
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.globalAlpha = 1
+    }
+
+    if (overlayText.trim() && fontLoaded) {
+      const fontSize = Math.max(canvas.width / 15, 32)
+      ctx.font = `700 ${fontSize}px "${selectedFont}"`
+      ctx.fillStyle = "#ffffff"
+      ctx.textAlign = "center"
+      ctx.textBaseline = "middle"
+      ctx.shadowColor = "rgba(0, 0, 0, 0.8)"
+      ctx.shadowBlur = 10
+      ctx.shadowOffsetX = 2
+      ctx.shadowOffsetY = 2
+
+      ctx.fillText(overlayText, canvas.width / 2, canvas.height / 2)
+    }
+  }, [currentImage, overlayColor, overlayOpacity, overlayText, selectedFont, fontLoaded, imageLoaded])
 
   const fetchSearchResults = async (query: string, page = 1, source: "all" | "unsplash" | "pexels" = "all") => {
     setIsLoadingSearch(true)
@@ -117,6 +202,7 @@ export default function Home() {
   }
 
   const selectSearchImage = (index: number) => {
+    setImageLoaded(false)
     setSelectedImageIndex(index)
     setIsTransitioning(true)
     setTimeout(() => {
@@ -126,29 +212,34 @@ export default function Home() {
 
   const handleImageLoad = () => {
     setIsImageLoading(false)
+    setImageLoaded(true)
   }
 
   const downloadImage = async () => {
-    if (!searchResults || searchResults.images.length === 0) return
+    if (!searchResults || searchResults.images.length === 0 || !canvasRef.current) return
 
     try {
       const currentImg = searchResults.images[selectedImageIndex]
-      const filename = `${currentImg.name.replace(/\s+/g, "_")}.jpg`
+      const filename = `${currentImg.name.replace(/\s+/g, "_")}_edited.jpg`
 
-      console.log("[v0] Starting download for:", currentImg.name)
+      canvasRef.current.toBlob(
+        (blob) => {
+          if (!blob) return
 
-      const downloadUrl = `/api/download-image?url=${encodeURIComponent(currentImg.src)}&filename=${encodeURIComponent(filename)}`
-
-      const link = document.createElement("a")
-      link.href = downloadUrl
-      link.download = filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-
-      console.log("[v0] Download initiated for:", filename)
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement("a")
+          link.href = url
+          link.download = filename
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          URL.revokeObjectURL(url)
+        },
+        "image/jpeg",
+        0.95,
+      )
     } catch (error) {
-      console.error("[v0] Error initiating download:", error)
+      console.error("Error downloading image:", error)
     }
   }
 
@@ -158,15 +249,12 @@ export default function Home() {
     }
   }
 
-  const currentImage = searchResults?.images[selectedImageIndex]
-
   return (
-    <div className="min-h-screen bg-background p-4">
-      <div className="max-w-7xl mx-auto">
-        <Card className="p-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 divide-y lg:divide-y-0 lg:divide-x divide-border">
-            {/* Left Column - Search Results */}
-            <div className="space-y-4 pb-6 lg:pb-0 lg:pr-6">
+    <div className="min-h-screen bg-background p-4 flex flex-col">
+      <div className="max-w-7xl mx-auto flex-1 flex flex-col">
+        <Card className="p-6 h-full flex flex-col">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 divide-y lg:divide-y-0 lg:divide-x divide-border flex-1">
+            <div className="space-y-4 pb-6 lg:pb-0 lg:pr-6 flex flex-col flex-1">
               <div className="p-4 space-y-3">
                 <div className="flex gap-2">
                   <Input
@@ -215,8 +303,8 @@ export default function Home() {
               </div>
 
               {searchResults && (
-                <div className="p-4">
-                  <div className="space-y-4">
+                <div className="p-4 flex-1 flex flex-col overflow-hidden">
+                  <div className="space-y-4 flex-1 flex flex-col">
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-semibold">Search Results</h3>
                       <span className="text-sm text-muted-foreground">{searchResults.total} results found</span>
@@ -228,39 +316,41 @@ export default function Home() {
                       </div>
                     ) : (
                       <>
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                          {searchResults.images.map((image, index) => (
-                            <div
-                              key={index}
-                              className={`aspect-[4/3] overflow-hidden rounded-lg border cursor-pointer transition-all relative ${
-                                selectedImageIndex === index
-                                  ? "ring-2 ring-primary"
-                                  : "hover:ring-2 hover:ring-primary/50"
-                              }`}
-                              onClick={() => selectSearchImage(index)}
-                            >
-                              <img
-                                src={image.thumbnail || image.src}
-                                alt={image.name}
-                                className="w-full h-full object-cover"
-                              />
-                              <div className="absolute top-2 right-2">
-                                <span
-                                  className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
-                                    image.source === "unsplash"
-                                      ? "bg-black/70 text-white"
-                                      : "bg-emerald-500/90 text-white"
-                                  }`}
-                                >
-                                  {image.source === "unsplash" ? "U" : "P"}
-                                </span>
+                        <div className="flex-1 overflow-y-auto">
+                          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                            {searchResults.images.map((image, index) => (
+                              <div
+                                key={index}
+                                className={`aspect-[4/3] overflow-hidden rounded-lg border cursor-pointer transition-all relative ${
+                                  selectedImageIndex === index
+                                    ? "ring-2 ring-primary"
+                                    : "hover:ring-2 hover:ring-primary/50"
+                                }`}
+                                onClick={() => selectSearchImage(index)}
+                              >
+                                <img
+                                  src={image.thumbnail || image.src}
+                                  alt={image.name}
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute top-2 right-2">
+                                  <span
+                                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                      image.source === "unsplash"
+                                        ? "bg-black/70 text-white"
+                                        : "bg-emerald-500/90 text-white"
+                                    }`}
+                                  >
+                                    {image.source === "unsplash" ? "U" : "P"}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
 
                         {searchResults.total_pages > 1 && (
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-center justify-between pt-4 border-t">
                             <Button
                               onClick={handlePrevPage}
                               disabled={currentPage <= 1 || isLoadingSearch}
@@ -286,6 +376,71 @@ export default function Home() {
                             </Button>
                           </div>
                         )}
+
+                        <div className="space-y-4 pt-4 border-t">
+                          <h4 className="text-sm font-semibold">Image Editor</h4>
+
+                          <div className="space-y-3">
+                            <div className="space-y-2">
+                              <Label htmlFor="overlay-color" className="text-xs">
+                                Overlay Color
+                              </Label>
+                              <div className="flex gap-2 items-center">
+                                <input
+                                  id="overlay-color"
+                                  type="color"
+                                  value={overlayColor}
+                                  onChange={(e) => setOverlayColor(e.target.value)}
+                                  className="w-12 h-10 rounded border cursor-pointer"
+                                />
+                                <div className="flex-1 space-y-1">
+                                  <div className="flex justify-between text-xs text-muted-foreground">
+                                    <span>Opacity</span>
+                                    <span>{overlayOpacity}%</span>
+                                  </div>
+                                  <Slider
+                                    value={[overlayOpacity]}
+                                    onValueChange={(value) => setOverlayOpacity(value[0])}
+                                    max={100}
+                                    step={1}
+                                    className="w-full"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="overlay-text" className="text-xs">
+                                Text
+                              </Label>
+                              <Input
+                                id="overlay-text"
+                                placeholder="Enter text to overlay..."
+                                value={overlayText}
+                                onChange={(e) => setOverlayText(e.target.value)}
+                                className="text-sm"
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label htmlFor="font-select" className="text-xs">
+                                Font
+                              </Label>
+                              <Select value={selectedFont} onValueChange={setSelectedFont}>
+                                <SelectTrigger id="font-select" className="text-sm">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {GOOGLE_FONTS.map((font) => (
+                                    <SelectItem key={font} value={font} className="text-sm">
+                                      {font}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </div>
                       </>
                     )}
                   </div>
@@ -293,7 +448,6 @@ export default function Home() {
               )}
             </div>
 
-            {/* Right Column - Selected Image Details */}
             <div className="space-y-4 pt-6 lg:pt-0 lg:pl-6">
               <div className="p-6">
                 {searchResults && searchResults.images.length > 0 ? (
@@ -304,14 +458,23 @@ export default function Home() {
                           <div className="w-12 h-12 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                         </div>
                       )}
-                      <img
-                        src={currentImage?.src || "/placeholder.svg"}
-                        alt={currentImage?.name || "Loading..."}
+                      <canvas
+                        ref={canvasRef}
                         className={`w-full h-full object-cover transition-opacity duration-300 ${
                           isTransitioning ? "opacity-0" : "opacity-100"
                         }`}
+                      />
+                      <img
+                        ref={imageRef}
+                        src={currentImage?.src || "/placeholder.svg"}
+                        alt={currentImage?.name || "Loading..."}
+                        className="hidden"
                         onLoad={handleImageLoad}
-                        onLoadStart={() => setIsImageLoading(true)}
+                        onLoadStart={() => {
+                          setIsImageLoading(true)
+                          setImageLoaded(false)
+                        }}
+                        crossOrigin="anonymous"
                       />
                     </div>
 

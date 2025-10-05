@@ -91,8 +91,9 @@ async function fetchUnsplash(query: string, page: number, perPage: number, apiKe
         src: item.urls.regular,
         name: item.alt_description || item.description || `${query} View ${index + 1}`,
         location: `Search: ${query}`,
-        thumbnail: item.urls.small, // Using higher quality small URL instead of thumb for better clarity
+        thumbnail: item.urls.small,
         source: "unsplash",
+        downloadUrl: item.urls.full, // Added downloadUrl using full quality for Unsplash
         metadata: {
           photographer: item.user?.name || "Unknown",
           likes: item.likes || 0,
@@ -149,8 +150,9 @@ async function fetchPexels(query: string, page: number, perPage: number, apiKey?
         src: item.src.large,
         name: item.alt || `${query} Photo ${index + 1}`,
         location: `Search: ${query}`,
-        thumbnail: item.src.medium, // Using medium quality URL instead of small for better clarity
+        thumbnail: item.src.medium,
         source: "pexels",
+        downloadUrl: item.src.original, // Added downloadUrl using original quality for Pexels
         metadata: {
           photographer: item.photographer || "Unknown",
           likes: 0,
